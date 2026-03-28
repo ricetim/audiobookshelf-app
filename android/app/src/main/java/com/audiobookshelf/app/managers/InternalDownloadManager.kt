@@ -4,6 +4,7 @@ import android.util.Log
 import java.io.*
 import java.util.concurrent.TimeUnit
 import okhttp3.*
+import okhttp3.ConnectionPool
 
 /**
  * Manages the internal download process.
@@ -20,9 +21,13 @@ class InternalDownloadManager(
   private val writer = BinaryFileWriter(outputStream, progressCallback)
 
   companion object {
-    // Shared across all downloads so TCP connections are reused between files
+    // Shared across all downloads so TCP connections are reused between files.
+    // Pool size matches maxSimultaneousDownloads in DownloadItemManager.
     val client: OkHttpClient =
-            OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).build()
+            OkHttpClient.Builder()
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
+                    .build()
   }
 
   /**
@@ -43,14 +48,16 @@ class InternalDownloadManager(
                       }
 
                       override fun onResponse(call: Call, response: Response) {
-                        response.body?.let { responseBody ->
+                        val body = response.body
+                        if (body == null) {
+                          Log.e(tag, "Response doesn't contain a file")
+                          progressCallback.onComplete(true)
+                          return
+                        }
+                        body.use { responseBody ->
                           val length: Long = response.header("Content-Length")?.toLongOrNull() ?: 0L
                           writer.write(responseBody.byteStream(), length)
                         }
-                                ?: run {
-                                  Log.e(tag, "Response doesn't contain a file")
-                                  progressCallback.onComplete(true)
-                                }
                       }
                     }
             )

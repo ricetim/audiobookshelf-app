@@ -34,7 +34,7 @@ class DownloadItemManager(
         private var clientEventEmitter: DownloadEventEmitter
 ) {
   val tag = "DownloadItemManager"
-  private val maxSimultaneousDownloads = 3
+  private val maxSimultaneousDownloads = 5 // matches OkHttp connection pool size
   private var jacksonMapper =
           jacksonObjectMapper()
                   .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature())
@@ -77,20 +77,21 @@ class DownloadItemManager(
 
   /** Checks and updates the download queue. */
   private fun checkUpdateDownloadQueue() {
-    for (downloadItem in downloadItemQueue) {
-      val numPartsToGet = maxSimultaneousDownloads - currentDownloadItemParts.size
-      val nextDownloadItemParts = downloadItem.getNextDownloadItemParts(numPartsToGet)
-      Log.d(
-              tag,
-              "checkUpdateDownloadQueue: numPartsToGet=$numPartsToGet, nextDownloadItemParts=${nextDownloadItemParts.size}"
-      )
-
-      if (nextDownloadItemParts.isNotEmpty()) {
-        processDownloadItemParts(nextDownloadItemParts)
-      }
-
-      if (currentDownloadItemParts.size >= maxSimultaneousDownloads) {
-        break
+    // Distribute slots round-robin across queued books so all books make
+    // progress simultaneously rather than downloading one book at a time.
+    var slotsRemaining = maxSimultaneousDownloads - currentDownloadItemParts.size
+    var anyStarted = true
+    while (slotsRemaining > 0 && anyStarted) {
+      anyStarted = false
+      for (downloadItem in downloadItemQueue) {
+        if (slotsRemaining <= 0) break
+        val nextParts = downloadItem.getNextDownloadItemParts(1)
+        if (nextParts.isNotEmpty()) {
+          Log.d(tag, "checkUpdateDownloadQueue: starting part for ${downloadItem.media.metadata.title}")
+          processDownloadItemParts(nextParts)
+          slotsRemaining--
+          anyStarted = true
+        }
       }
     }
 
