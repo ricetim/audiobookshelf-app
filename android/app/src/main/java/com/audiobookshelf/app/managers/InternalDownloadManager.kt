@@ -84,18 +84,21 @@ class BinaryFileWriter(
    */
   @Throws(IOException::class)
   fun write(inputStream: InputStream, length: Long): Long {
-    BufferedInputStream(inputStream).use { input ->
-      val dataBuffer = ByteArray(CHUNK_SIZE)
-      var totalBytes: Long = 0
-      var readBytes: Int
-      while (input.read(dataBuffer).also { readBytes = it } != -1) {
-        totalBytes += readBytes
-        outputStream.write(dataBuffer, 0, readBytes)
+    val dataBuffer = ByteArray(CHUNK_SIZE)
+    var totalBytes: Long = 0
+    var readBytes: Int
+    var lastProgressBytes: Long = 0
+    while (inputStream.read(dataBuffer).also { readBytes = it } != -1) {
+      totalBytes += readBytes
+      outputStream.write(dataBuffer, 0, readBytes)
+      if (totalBytes - lastProgressBytes >= PROGRESS_INTERVAL_BYTES) {
         progressCallback.onProgress(totalBytes, (totalBytes * 100L) / length)
+        lastProgressBytes = totalBytes
       }
-      progressCallback.onComplete(false)
-      return totalBytes
     }
+    progressCallback.onProgress(totalBytes, if (length > 0) (totalBytes * 100L) / length else 100L)
+    progressCallback.onComplete(false)
+    return totalBytes
   }
 
   /**
@@ -109,6 +112,7 @@ class BinaryFileWriter(
   }
 
   companion object {
-    private const val CHUNK_SIZE = 8192 // Increased chunk size for better performance
+    private const val CHUNK_SIZE = 262144 // 256 KiB — matches typical SFTP/SCP frame size
+    private const val PROGRESS_INTERVAL_BYTES = 2 * 1024 * 1024 // report progress every 2 MiB
   }
 }
