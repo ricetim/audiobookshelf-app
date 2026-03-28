@@ -26,6 +26,7 @@ class InternalDownloadManager(
     val client: OkHttpClient =
             OkHttpClient.Builder()
                     .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.SECONDS) // no timeout — large audio files can take minutes
                     .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
                     .build()
   }
@@ -55,6 +56,11 @@ class InternalDownloadManager(
                           return
                         }
                         body.use { responseBody ->
+                          if (!response.isSuccessful) {
+                            Log.e(tag, "Download URL $url failed with HTTP ${response.code}")
+                            progressCallback.onComplete(true)
+                            return
+                          }
                           val length: Long = response.header("Content-Length")?.toLongOrNull() ?: 0L
                           writer.write(responseBody.byteStream(), length)
                         }
@@ -93,22 +99,28 @@ class BinaryFileWriter(
    * @return The total number of bytes written.
    * @throws IOException If an I/O error occurs.
    */
-  @Throws(IOException::class)
   fun write(inputStream: InputStream, length: Long): Long {
     val dataBuffer = ByteArray(CHUNK_SIZE)
     var totalBytes: Long = 0
     var readBytes: Int
     var lastProgressBytes: Long = 0
-    while (inputStream.read(dataBuffer).also { readBytes = it } != -1) {
-      totalBytes += readBytes
-      outputStream.write(dataBuffer, 0, readBytes)
-      if (totalBytes - lastProgressBytes >= PROGRESS_INTERVAL_BYTES) {
-        progressCallback.onProgress(totalBytes, (totalBytes * 100L) / length)
-        lastProgressBytes = totalBytes
+    try {
+      while (inputStream.read(dataBuffer).also { readBytes = it } != -1) {
+        totalBytes += readBytes
+        outputStream.write(dataBuffer, 0, readBytes)
+        if (totalBytes - lastProgressBytes >= PROGRESS_INTERVAL_BYTES) {
+          progressCallback.onProgress(totalBytes, if (length > 0) (totalBytes * 100L) / length else 0L)
+          lastProgressBytes = totalBytes
+        }
       }
+      progressCallback.onProgress(totalBytes, if (length > 0) (totalBytes * 100L) / length else 100L)
+      progressCallback.onComplete(false)
+    } catch (e: IOException) {
+      Log.e("BinaryFileWriter", "IO error during download write after $totalBytes bytes", e)
+      progressCallback.onComplete(true)
+    } finally {
+      try { outputStream.close() } catch (e: IOException) { Log.w("BinaryFileWriter", "Failed to close output stream", e) }
     }
-    progressCallback.onProgress(totalBytes, if (length > 0) (totalBytes * 100L) / length else 100L)
-    progressCallback.onComplete(false)
     return totalBytes
   }
 

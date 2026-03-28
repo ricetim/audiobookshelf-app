@@ -21,6 +21,7 @@ import com.getcapacitor.JSObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.*
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
@@ -46,9 +47,9 @@ class DownloadItemManager(
   }
 
   var downloadItemQueue: MutableList<DownloadItem> =
-          mutableListOf() // All pending and downloading items
+          CopyOnWriteArrayList() // All pending and downloading items; COW for thread-safe iteration
   var currentDownloadItemParts: MutableList<DownloadItemPart> =
-          mutableListOf() // Item parts currently being downloaded
+          CopyOnWriteArrayList() // Item parts currently being downloaded; COW for thread-safe iteration
 
   interface DownloadEventEmitter {
     fun onDownloadItem(downloadItem: DownloadItem)
@@ -62,10 +63,11 @@ class DownloadItemManager(
   }
 
   companion object {
-    var isDownloading: Boolean = false
+    @Volatile var isDownloading: Boolean = false
   }
 
   /** Adds a download item to the queue and starts processing the queue. */
+  @Synchronized
   fun addDownloadItem(downloadItem: DownloadItem) {
     DeviceManager.dbManager.saveDownloadItem(downloadItem)
     Log.i(tag, "Add download item ${downloadItem.media.metadata.title}")
@@ -76,6 +78,7 @@ class DownloadItemManager(
   }
 
   /** Checks and updates the download queue. */
+  @Synchronized
   private fun checkUpdateDownloadQueue() {
     // Distribute slots round-robin across queued books so all books make
     // progress simultaneously rather than downloading one book at a time.
