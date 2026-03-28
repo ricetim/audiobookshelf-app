@@ -17,9 +17,13 @@ class InternalDownloadManager(
 ) : AutoCloseable {
 
   private val tag = "InternalDownloadManager"
-  private val client: OkHttpClient =
-          OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).build()
   private val writer = BinaryFileWriter(outputStream, progressCallback)
+
+  companion object {
+    // Shared across all downloads so TCP connections are reused between files
+    val client: OkHttpClient =
+            OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).build()
+  }
 
   /**
    * Downloads a file from the given URL.
